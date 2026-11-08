@@ -492,7 +492,9 @@ Excel compatibility should be considered, including UTF-8 BOM as an optional exp
 
 Support filtering by volume or media type in a future release.
 
-Reporting must be independent of the inventory scanner and support exporting selected query or analysis results, including duplicate groups, missing metadata, suspicious dates, and organization plans.## 10. Reporting and Data Export — Future Phase
+Reporting must be independent of the inventory scanner and support exporting selected query or analysis results, including duplicate groups, missing metadata, suspicious dates, and organization plans.
+
+## 10. Reporting and Data Export — Future Phase
 
 Reporting and data export are not required during the initial inventory collection phase.
 

@@ -1,0 +1,6 @@
+# Copy outside the repository, normally to %LOCALAPPDATA%/InventoryBuilder/config.toml.
+# Relative paths resolve against the configuration file's directory.
+database = "inventory.sqlite3"
+log_directory = "logs"
+batch_size = 100
+busy_timeout_ms = 5000
