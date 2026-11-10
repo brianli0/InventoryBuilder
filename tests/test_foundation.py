@@ -27,7 +27,7 @@ def test_initialization_repeat_and_persistence(database):
         assert connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
         assert connection.execute("PRAGMA synchronous").fetchone()[0] == 2
-        assert connection.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == 1
+        assert connection.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == 4
         seed(connection)
     finally:
         connection.close()
@@ -115,11 +115,11 @@ def test_cli(tmp_path, monkeypatch, capsys):
     assert main(['status']) == 0
     assert main(['volumes']) == 0
     output = capsys.readouterr().out
-    assert 'Schema version: 1' in output
+    assert 'Schema version: 4' in output
     assert 'No registered volumes.' in output
     assert (tmp_path / 'InventoryBuilder/logs/inventory_builder.log').is_file()
     with pytest.raises(SystemExit):
-        main(['scan', 'X:'])
+        main(['scan'])
 
 
 def test_process_lock_and_release(tmp_path):

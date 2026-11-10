@@ -1,3 +1,12 @@
 {
-    "python-envs.defaultEnvManager": "ms-python.python:system"
+    "python-envs.defaultEnvManager": "ms-python.python:system",
+    "sqltools.useNodeRuntime": true,
+    "sqltools.connections": [
+        {
+            "previewLimit": 50,
+            "driver": "SQLite",
+            "name": "InventoryBuilder",
+            "database": "C:\\Users\\brian\\AppData\\Local\\InventoryBuilder\\inventory.sqlite3"
+        }
+    ]
 }

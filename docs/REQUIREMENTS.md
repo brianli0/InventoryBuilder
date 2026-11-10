@@ -1,7 +1,8 @@
 # InventoryBuilder — Requirements Specification
 
-**Version:** 0.1  
-**Status:** Initial specification  
+**Version:** 0.2
+
+**Status:** Comprehensive collection implemented through Migration 004; production scanning requires explicit authorization
 **Platform:** Windows 11  
 **Language:** Python 3.11+  
 **Database:** SQLite  
@@ -19,6 +20,18 @@ The initial target is a collection containing hundreds of thousands of media fil
 The application must create a searchable, persistent inventory containing file locations, filesystem attributes, embedded metadata, and information useful for future organization and duplicate detection.
 
 The application must be reliable, resumable, and non-destructive.
+
+### 1.0 Collection policy
+
+Maintain one combined SQLite inventory across five static external drives. Scan
+one explicitly selected drive root or directory at a time; never choose targets
+automatically. Initial collection must include filesystem attributes, embedded
+photo/video metadata, and complete SHA-256 hashes for every supported photo.
+Do not hash videos. Video size and metadata may identify potential duplicates,
+not establish exact content equality. Discovery, extraction and photo hashing
+must all be resumable. Reporting and organization remain separate later phases.
+No actual external drive or personal collection may be scanned without explicit
+user authorization. Requirements and implementation plans do not grant that authorization.
 
 ### 1.1 Primary goals
 
@@ -52,7 +65,12 @@ All initial scanning operations must be strictly read-only with respect to sourc
 
 The scanner must never modify original files, file metadata, folder names, or directory structures.
 
-The SQLite database and generated output files must be stored outside the scanned media directories.
+The SQLite database and generated output files must be stored outside included
+media directories. Application runtime paths are mandatory exclusions; if a
+selected drive root contains a dedicated runtime directory, prune that subtree
+before enumeration. Reject a target/configuration that cannot isolate runtime
+writes from included source media. Never exclude an arbitrary shared media parent
+silently just because it contains a database file.
 
 ### 2.2 Recoverability
 
@@ -108,13 +126,27 @@ Volume identifiers may not always be unique or stable after reformatting or clon
 
 ### 3.2 One-drive-at-a-time scanning
 
-Only one source drive is actively scanned during a given command.
+Only one explicitly supplied source drive root or directory is actively scanned
+during a given command. Both `E:\` and `E:\Photos` are valid target forms.
+Reject ambiguous drive-relative forms such as `E:`. Resolving the selected
+target's containing volume is allowed; enumerating unrelated drives is not.
 
 All drives share the same SQLite database.
 
 Progress and checkpoints must be maintained independently for each scan root.
 
 The application must support switching between drives without losing previously recorded progress.
+
+### 3.4 Overlapping scan roots
+
+Allow a volume root and any of its subdirectories to be scanned in separate
+commands. File identity is the confirmed persistent volume identity plus a
+normalized volume-relative path, not the selected root or drive letter. Different
+root/session observations reference the same media record. Preserve exact path
+spelling separately from comparison keys. Do not merge ambiguous volume identities
+or path collisions automatically. Transactional conversion of existing provisional
+folder scopes must preserve media IDs, metadata, fingerprints, observations and
+history; collisions require explicit resolution and cannot silently discard records.
 
 ### 3.3 Disconnected volumes
 
@@ -301,7 +333,10 @@ Additional utilities such as ffprobe may be introduced if ExifTool does not prov
 
 ### 7.1 Database location
 
-The active SQLite database must reside on the notebook's internal SSD, outside any scanned folders and cloud-synchronized directories.
+The active SQLite database must reside on the notebook's internal SSD, outside
+included scan scope and cloud-synchronized directories. For a whole-drive target,
+an intersecting dedicated runtime subtree must be mandatorily excluded as defined
+in section 8.2.1; source-media directories must never receive runtime writes.
 
 The database file must not be committed to Git.
 
@@ -333,9 +368,28 @@ Start and end times, status, statistics, failures, and configuration versions fo
 
 Individual scanning or metadata extraction failures, including retry status.
 
-**file_hashes** (later phase)
+**file_hashes** (initial collection)
 
-Calculated hashes and verification information.
+Complete photo SHA-256 results, observed file fingerprints and verification
+information. Unfinished/failed hash work belongs in durable processing jobs.
+Never store a partial digest as a completed file hash. No video hash jobs/results.
+
+**scan_policies / scan_exclusions**
+
+Immutable effective exclusion/processing policy snapshots and structured rules,
+including origins, matching/configuration versions and persistent volume-relative
+paths. Each session references its exact policy.
+
+**processing_jobs / session_processing_jobs / file_revisions**
+
+Independently resumable metadata and photo-hash work, linked to media fingerprints,
+sessions and claiming runs. Keep discovery completion separate from collection
+processing completion.
+
+**metadata_results**
+
+Immutable extraction history and original metadata/date values. Preserve legacy
+metadata before replacing any current projection.
 
 **duplicate_groups** (later phase)
 
@@ -384,6 +438,55 @@ Database uniqueness constraints must make repeated directory enumeration safe.
 
 Use small, configurable transaction batches.
 
+### 8.2.1 Directory exclusions and path safety
+
+- Accept repeated `--exclude` directory arguments and persistent
+  `exclude_directories` configuration entries. Combine them with documented
+  system/application defaults by union; no implicit inclusion overrides.
+- Relative user/configuration exclusions are relative to the selected scan root,
+  never the shell's current directory or configuration-file directory. Absolute
+  exclusions must resolve inside that root. Directory rules exclude the directory
+  itself and every descendant, using path-component containment, not string-prefix
+  matching. User exclusion globs are not part of this increment.
+- Normalize separators and dot segments, reject escapes, drive-relative paths,
+  alternate-data-stream syntax and unsupported device namespaces. Do not follow
+  junctions/symlinks/reparse points to resolve exclusions outside the selected root.
+  Nonexistent exclusion directories may be recorded lexically without enumerating
+  parents or descendants. Existing file paths supplied as directory exclusions
+  are validation errors. Reject a user exclusion equal to the entire target.
+- Windows comparisons must use Windows-compatible case-insensitive path semantics,
+  preserving display spelling. Do not rely on SQLite NOCASE or generic Unicode
+  casefold as an exact substitute. If a case-sensitive Windows directory creates
+  ambiguous matches, stop for explicit resolution rather than merge or overexclude.
+  Record the matching implementation/version with the session.
+- Ordinary exclusions outside the target are errors. Only documented, typed global
+  rules may lie outside it: selected-volume-root system rules and exact configured
+  application runtime directories/files. Such rules intersect the selected scope;
+  rules with no intersection are recorded as inactive and never traversed.
+- Default system directory rules are anchored at the selected volume root:
+  `$RECYCLE.BIN`, `System Volume Information`, `Windows`, `Program Files`,
+  `Program Files (x86)`, `ProgramData`, `Recovery`, and `$WinREAgent`.
+  Do not apply these names at arbitrary depths; do not default-exclude `Users`
+  or personal media directories. Their contents must not be enumerated.
+- Mandatory application rules protect dedicated runtime/log/temp/backup/report
+  directories and exact database, WAL, SHM and lock files where needed. These are
+  path-specific rules, not a blanket exclusion of every .db or .log file.
+- Check exclusions before queueing/opening directories and before claiming any
+  previously queued directory or file job. Selecting a target wholly covered by
+  a mandatory exclusion is an error. Runtime protection cannot be disabled.
+- Store canonical effective rules, supplied values, origins, normalization and
+  default-rule versions, and configuration version with every session before work
+  starts. Store paths relative to persistent volume identities so changed drive
+  letters do not change the semantic policy. Retain the original invocation too.
+- A session's policy is immutable. Resume may explicitly use its saved policy;
+  when current CLI/configuration/defaults differ, refuse silent resume and explain
+  the difference. Require an explicit new or reconciled scan. Reconciliation creates
+  a linked successor session; it never rewrites the predecessor's policy/history.
+- Excluded files/directories have no observation requirement in that session.
+  They and unavailable paths must not be classified as deleted or missing merely
+  because they were not observed. Reconciliation is scoped to covered, included
+  paths with successful enumeration, never the whole volume unconditionally.
+
 ### 8.3 File processing states
 
 Suggested states:
@@ -416,7 +519,7 @@ A second forced interruption or power failure may lose the current uncommitted t
 
 The command:
 
-`python -m inventory_builder scan E:`
+`python -m inventory_builder scan E:\`
 
 must resume outstanding work for the recognized volume and scan root.
 
@@ -425,6 +528,11 @@ A changed drive letter must not automatically create a new volume identity.
 Completed, unchanged files must not undergo redundant metadata extraction.
 
 Any partially processed directory or file must be safely revisited.
+
+Resume must also preserve the saved exclusion policy and recover unfinished
+metadata/photo-hash jobs. Changed rules require an explicit successor scan; reuse
+completed work only when file fingerprints and the relevant processing policy/tool
+versions still match. Unavailable volumes never trigger inventory removal.
 
 ### 8.6 Subsequent inventory scans
 
@@ -458,9 +566,25 @@ The total number of files may be unknown during directory discovery. Do not pres
 
 ## 9. Command-Line Interface
 
-python -m inventory_builder scan E:
+```powershell
+python -m inventory_builder scan E:\ --exclude "E:\Private" --exclude "Cache"
+python -m inventory_builder scan "E:\Photos" --exclude "Unsorted" --exclude "Old Copies"
 python -m inventory_builder status
 python -m inventory_builder volumes
+python -m inventory_builder verify "E:\Photos"
+python -m inventory_builder status "E:\Photos"
+```
+
+The target/exclusion syntax above is implemented through Migration 003. Explicit
+saved-policy resume and new/reconciled-session controls are specified in
+`docs/IMPLEMENTATION_PLAN.md`. Examples do not authorize a real collection scan.
+
+Migration 004 integrates metadata and photo hashing into `scan TARGET`. `verify TARGET`
+returns success only for comprehensive recorded completion of the latest session at
+that target, including all required current-revision results. It does not access the
+source to prove that files remain unchanged after the checkpoint. Status separates
+discovery/metadata/hash counts and retry history. Failed stages keep the scan incomplete.
+`--retry-failed` explicitly grants failed jobs another bounded attempt budget.
 
 ## 10. Reporting and Data Export — Future Phase.
 
@@ -525,10 +649,18 @@ The reporting system must not modify original media files or inventory records.
 
 Exact duplicate detection should operate across all inventoried drives.
 
-Use a staged approach:
+Initial collection hashes every supported photo, even when it has no current
+size-matched duplicate candidate. Read bounded chunks, use SHA-256, and verify
+the file fingerprint before and after reading. A changed file invalidates that
+attempt. Persist the complete digest only after successful full-file processing.
+Interrupted photo hashing restarts that file from byte zero; completed photo jobs
+are retained and skipped when current. Mid-file hash-state serialization is not
+required. Do not hash videos.
+
+Subsequent photo duplicate analysis uses a staged approach:
 
 1. Group candidate files by size.
-2. Calculate cryptographic hashes for appropriate candidates.
+2. Reuse complete current photo SHA-256 results; queue missing/stale photo results.
 3. Group files by matching hash and file size.
 4. Record duplicate groups.
 5. Present candidate duplicates for review.
@@ -540,6 +672,10 @@ Do not claim that a partially calculated hash is a completed file hash.
 A SHA-256 match provides a strong indication of exact content equality.
 
 Perceptual image hashing and visually similar media detection belong to a later phase.
+
+Video duplicate candidates use file size plus available duration, resolution,
+container/codec, capture date and other suitable metadata. Label them potential
+duplicates requiring review; matching size/metadata is not proof of byte equality.
 
 The initial duplicate detector must never delete source files.
 
@@ -602,6 +738,14 @@ Tests should include:
 - Transaction rollback behavior
 - CSV export accuracy
 - Database uniqueness and referential integrity
+- Drive-root and subdirectory targets without unrelated-drive enumeration
+- Repeated CLI exclusions combined with persistent configuration exclusions
+- Excluded subtrees never opened/enumerated, including requeued work on resume
+- Windows case/separator variants, path-component boundaries and exclusion escapes
+- Immutable saved policies, changed defaults, drive-letter changes and explicit successor scans
+- Overlapping roots reuse media IDs and valid completed processing work
+- Excluded/unavailable files never incorrectly classified as missing/deleted
+- Photo-only full-file SHA-256, stale-fingerprint invalidation and interrupted job recovery
 
 ### 14.1 Mandatory recovery tests
 
@@ -638,7 +782,8 @@ Support configuration for:
 - Batch size
 - Metadata extraction timeout
 - Retry policy
-- File exclusion patterns
+- Directory exclusions (`exclude_directories`, a list of root-relative or in-root absolute paths)
+- Exclusion default/matching/configuration versions and documented global runtime rules
 - Capture-date precedence policy
 
 Keep machine-specific configuration out of Git.
@@ -683,7 +828,7 @@ InventoryBuilder/
 ├── docs/
 │   └── REQUIREMENTS.md
 ├── config/
-│   └── example.yaml
+│   └── example.toml
 ├── AGENTS.md
 ├── .gitignore
 ├── pyproject.toml
@@ -728,6 +873,23 @@ Runtime database files, logs, reports, and temporary output should reside in a s
 
 **Acceptance criterion:** Successfully inventory representative JPEG, HEIC, RAW, MP4, and MOV samples.
 
+### Approved prerequisite extension — Flexible targets and exclusions
+
+Before authorizing real collection, implement persistent physical-volume binding,
+drive-root/directory targets, overlapping-root identity reuse, default/config/CLI
+exclusions, immutable versioned policies, and explicit resume/new/reconciled sessions.
+Test solely with disposable folders and mocked drive/volume interfaces. Implemented
+through Migration 003; real external-drive scanning still requires authorization.
+
+### Initial collection readiness — Resumable photo hashes
+
+Implement durable photo-only SHA-256 jobs and integrate metadata/photo hashing
+with session processing completion. Filesystem discovery, embedded metadata and
+complete photo hashing must all be available for initial collection; do not defer
+required hashes until duplicate analysis. Videos have metadata but no hash jobs.
+Each implementation stage requires its own approval; this document update does
+not begin Milestone 3, hashing implementation, or actual external-drive scanning.
+
 ### Milestone 4 — Reporting and incremental scans
 
 - Combined CSV export
@@ -741,7 +903,8 @@ Runtime database files, logs, reports, and temporary output should reside in a s
 ### Milestone 5 — Exact duplicate detection
 
 - Candidate grouping by file size
-- Resumable SHA-256 calculation
+- Reuse initial-collection photo SHA-256 results; refresh stale/missing photo jobs
+- Size/metadata-based potential video duplicate candidates; no video hashing
 - Cross-drive duplicate grouping
 - Duplicate report
 
@@ -774,9 +937,11 @@ The first production-ready inventory release must:
 7. Preserve records when a drive is disconnected.
 8. Skip unchanged completed files during subsequent scans.
 9. Report individual file extraction failures.
-10. Export a combined CSV report.
+10. Preserve queryable SQLite results; CSV/reporting remains optional and later.
 11. Pass automated tests covering interruption and recovery.
-12. Successfully process a representative full external drive.
+12. Successfully process a representative full external drive after explicit authorization.
+13. Complete SHA-256 for every included supported photo, without hashing videos.
+14. Preserve immutable exclusion policies and correct coverage across resume and overlapping roots.
 
 ---
 

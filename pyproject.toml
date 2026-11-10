@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "inventory-builder"
-version = "0.1.0"
-description = "Local, non-destructive media inventory foundation"
+version = "0.3.1"
+description = "Local resumable media inventory, metadata extraction and photo hashing"
 requires-python = ">=3.11"
 dependencies = []
 

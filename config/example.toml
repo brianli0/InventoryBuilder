@@ -4,3 +4,22 @@ database = "inventory.sqlite3"
 log_directory = "logs"
 batch_size = 100
 busy_timeout_ms = 5000
+config_schema_version = 2
+# Relative directory exclusions resolve against the selected scan target.
+exclude_directories = []
+exiftool_path = "exiftool"
+metadata_mode = "batch" # "single" for per-file debugging
+metadata_batch_size = 32
+metadata_timeout_seconds = 60
+metadata_output_limit = 16777216 # Total stdout bytes per invocation
+processing_max_attempts = 3
+retry_delay_seconds = 2
+hash_chunk_bytes = 8388608
+capture_date_precedence = ["DateTimeOriginal", "CreationDate", "CreateDate", "MediaCreateDate", "TrackCreateDate"]
+# Optional dedicated application-generated directories (never source media):
+# temp_directory = "tmp"
+# backup_directory = "backups"
+# report_directory = "reports"
+# Optional replacement lists; extensions must begin with a dot.
+# photo_extensions = [".jpg", ".jpeg", ".heic", ".png"]
+# video_extensions = [".mp4", ".mov"]
